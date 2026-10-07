@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Compresor de PDF</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>document.documentElement.dataset.v="1"</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f4f6f9;--card:#fff;--tx:#1b1f24;--mut:#667085;--bd:#d6dbe3;--ac:#2f6fed;--acx:#fff;--ok:#18794e;--er:#c0362c}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14161a;--card:#1d2026;--tx:#e8eaee;--mut:#9aa3b2;--bd:#343a45;--ac:#6b9bff;--acx:#0d1117;--ok:#4cc38a;--er:#ff7b72}}
+:root[data-theme="dark"]{--bg:#14161a;--card:#1d2026;--tx:#e8eaee;--mut:#9aa3b2;--bd:#343a45;--ac:#6b9bff;--acx:#0d1117;--ok:#4cc38a;--er:#ff7b72}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.4rem;margin:0 0 4px}p.s{color:var(--mut);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+.drop{display:block;border:2px dashed var(--bd);border-radius:12px;padding:26px 12px;text-align:center;cursor:pointer;color:var(--mut)}
+.drop.on,.drop:hover{border-color:var(--ac);color:var(--tx)}
+.drop b{color:var(--ac)}input[type=file]{display:none}
+label.f{display:block;margin-top:14px;font-weight:600}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input[type=range]{flex:1;min-width:160px;accent-color:var(--ac)}
+output{min-width:70px;text-align:right;font-variant-numeric:tabular-nums}
+input[type=number]{width:110px;padding:7px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip,button{font:inherit;border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:999px;padding:4px 12px;cursor:pointer}
+button.p{background:var(--ac);color:var(--acx);border-color:var(--ac);border-radius:10px;padding:10px 18px;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.h{color:var(--mut);font-size:.85rem;margin-top:4px}
+.fl{margin:10px 0 0;padding:0;list-style:none;font-size:.9rem;color:var(--mut)}
+.res{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.res .n{font-weight:600;word-break:break-all}.ok{color:var(--ok)}.er{color:var(--er)}
+</style>
+</head>
+<body>
+<main>
+<h1>Compresor de PDF</h1>
+<p class="s">Todo ocurre en tu navegador: los archivos no se suben a ningún servidor.</p>
+
+<div class="card">
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="application/pdf,.pdf" multiple>
+    <div><b>Elegir PDF</b> o arrastrarlo aquí</div>
+    <div class="h">Puedes seleccionar varios</div>
+  </label>
+  <ul class="fl" id="list"></ul>
+
+  <label class="f" for="dpi">Resolución máxima</label>
+  <div class="row"><input type="range" id="dpi" min="50" max="300" step="10" value="200"><output id="dpiO">200 dpi</output></div>
+  <div class="chips" id="dpiC"></div>
+
+  <label class="f" for="q">Calidad de imagen</label>
+  <div class="row"><input type="range" id="q" min="30" max="95" step="5" value="80"><output id="qO">80 %</output></div>
+
+  <label class="f" for="max">Tamaño máximo por archivo (KB)</label>
+  <div class="row"><input type="number" id="max" min="20" step="10" value="250" placeholder="sin límite"><span class="h">Déjalo vacío para usar solo resolución y calidad.</span></div>
+  <div class="h">Con límite de tamaño, baja la calidad y luego la resolución hasta que el archivo quepa.</div>
+
+  <div style="margin-top:16px"><button class="p" id="go" disabled>Comprimir</button> <span class="h" id="st"></span></div>
+</div>
+<div id="out"></div>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+let files=[];
+const kb=b=>b<1048576?(b/1024).toFixed(0)+' KB':(b/1048576).toFixed(2)+' MB';
+
+[72,100,150,200,300].forEach(v=>{const b=document.createElement('button');b.className='chip';b.textContent=v+' dpi';b.onclick=()=>{$('#dpi').value=v;upd()};$('#dpiC').appendChild(b)});
+const upd=()=>{$('#dpiO').textContent=$('#dpi').value+' dpi';$('#qO').textContent=$('#q').value+' %'};
+$('#dpi').oninput=$('#q').oninput=upd;
+
+function setFiles(fl){
+  files=[...fl].filter(f=>/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name));
+  $('#list').innerHTML='';
+  files.forEach(f=>{const li=document.createElement('li');li.textContent=f.name+' — '+kb(f.size);$('#list').appendChild(li)});
+  $('#go').disabled=!files.length;
+}
+$('#file').onchange=e=>setFiles(e.target.files);
+const dr=$('#drop');
+['dragover','dragenter'].forEach(t=>dr.addEventListener(t,e=>{e.preventDefault();dr.classList.add('on')}));
+['dragleave','drop'].forEach(t=>dr.addEventListener(t,e=>{e.preventDefault();dr.classList.remove('on')}));
+dr.addEventListener('drop',e=>setFiles(e.dataTransfer.files));
+
+function buildPdf(pg){
+  const te=new TextEncoder(),parts=[],off=[];let pos=0;
+  const put=x=>{const b=typeof x==='string'?te.encode(x):x;parts.push(b);pos+=b.length};
+  const N=2+3*pg.length;
+  put('%PDF-1.4\n');
+  off[1]=pos;put('1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n');
+  off[2]=pos;put('2 0 obj\n<</Type/Pages/Count '+pg.length+'/Kids['+pg.map((_,i)=>(3+3*i)+' 0 R').join(' ')+']>>\nendobj\n');
+  pg.forEach((p,i)=>{
+    const a=3+3*i,c=a+1,m=a+2,w=p.pw.toFixed(2),h=p.ph.toFixed(2),ct='q '+w+' 0 0 '+h+' 0 0 cm /Im0 Do Q';
+    off[a]=pos;put(a+' 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 '+w+' '+h+']/Resources<</XObject<</Im0 '+m+' 0 R>>>>/Contents '+c+' 0 R>>\nendobj\n');
+    off[c]=pos;put(c+' 0 obj\n<</Length '+ct.length+'>>\nstream\n'+ct+'\nendstream\nendobj\n');
+    off[m]=pos;put(m+' 0 obj\n<</Type/XObject/Subtype/Image/Width '+p.w+'/Height '+p.h+'/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length '+p.jpg.length+'>>\nstream\n');
+    put(p.jpg);put('\nendstream\nendobj\n');
+  });
+  const xr=pos;let x='xref\n0 '+(N+1)+'\n0000000000 65535 f \n';
+  for(let i=1;i<=N;i++)x+=String(off[i]).padStart(10,'0')+' 00000 n \n';
+  put(x+'trailer\n<</Size '+(N+1)+'/Root 1 0 R>>\nstartxref\n'+xr+'\n%%EOF');
+  return new Blob(parts,{type:'application/pdf'});
+}
+
+async function compress(file,o,log){
+  const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer()),isEvalSupported:false,useSystemFonts:true}).promise;
+  const pages=[];for(let i=1;i<=pdf.numPages;i++)pages.push(await pdf.getPage(i));
+  const render=async dpi=>{
+    const out=[];
+    for(const p of pages){
+      const v0=p.getViewport({scale:1});let s=dpi/72;
+      if(v0.width*v0.height*s*s>36e6)s=Math.sqrt(36e6/(v0.width*v0.height));
+      const v=p.getViewport({scale:s}),c=document.createElement('canvas');
+      c.width=Math.round(v.width);c.height=Math.round(v.height);
+      const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+      await p.render({canvasContext:x,viewport:v}).promise;
+      out.push({c,pw:v0.width,ph:v0.height});
+    }
+    return out;
+  };
+  const enc=cv=>q=>Promise.all(cv.map(async o=>{
+    const b=await new Promise(r=>o.c.toBlob(r,'image/jpeg',q));
+    return{w:o.c.width,h:o.c.height,pw:o.pw,ph:o.ph,jpg:new Uint8Array(await b.arrayBuffer())};
+  }));
+  let dpi=o.dpi,q=o.q/100,best;const lim=o.max?o.max*1024-4096:0;
+  for(;;){
+    log('Renderizando a '+dpi+' dpi…');
+    const cv=await render(dpi),e=enc(cv);
+    for(let qq=q;;qq-=0.07){
+      qq=Math.max(qq,0.3);
+      const blob=buildPdf(await e(qq));best={blob,dpi,q:qq};
+      log(dpi+' dpi · calidad '+Math.round(qq*100)+' % → '+kb(blob.size));
+      if(!lim||blob.size<=lim||qq<=0.3)break;
+    }
+    cv.forEach(x=>{x.c.width=x.c.height=0});
+    if(!lim||best.blob.size<=lim||dpi<=72)break;
+    dpi=Math.max(72,Math.round(dpi*0.85));q=Math.min(q,0.5);
+  }
+  return best;
+}
+
+async function save(name,blob){
+  try{
+    const d=window.claude&&await window.claude.use('downloads');
+    if(d){await d.save({filename:name,data:blob});return}
+  }catch(e){if(e&&e.code==='declined')return}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+$('#go').onclick=async()=>{
+  if(typeof pdfjsLib==='undefined'){$('#st').textContent='No se pudo cargar el lector de PDF (revisa tu conexión).';return}
+  const o={dpi:+$('#dpi').value,q:+$('#q').value,max:+$('#max').value||0};
+  $('#go').disabled=true;$('#out').innerHTML='';
+  for(const f of files){
+    const card=document.createElement('div');card.className='card res';
+    card.innerHTML='<div><div class="n"></div><div class="h"></div></div>';
+    card.querySelector('.n').textContent=f.name;$('#out').appendChild(card);
+    const info=card.querySelector('.h');
+    try{
+      const r=await compress(f,o,t=>{info.textContent=t;$('#st').textContent=t});
+      const name=f.name.replace(/\.pdf$/i,'')+'_comp.pdf',pct=Math.round((1-r.blob.size/f.size)*100);
+      const miss=o.max&&r.blob.size>o.max*1024;
+      info.innerHTML='';
+      const l1=document.createElement('div');l1.className=miss?'er':'ok';
+      l1.textContent=kb(f.size)+' → '+kb(r.blob.size)+(pct>0?' (−'+pct+' %)':' (no se redujo)');
+      const l2=document.createElement('div');
+      l2.textContent=r.dpi+' dpi · calidad '+Math.round(r.q*100)+' %'+(miss?' · no alcanzó '+o.max+' KB; prueba con menos resolución o mayor límite':'');
+      info.append(l1,l2);
+      const b=document.createElement('button');b.className='p';b.textContent='Descargar';
+      b.onclick=()=>save(name,r.blob);card.appendChild(b);
+    }catch(e){info.textContent='Error: '+(e&&e.message||e);info.className='h er'}
+  }
+  $('#st').textContent='';$('#go').disabled=false;
+};
+</script>
+</body>
+</html>
