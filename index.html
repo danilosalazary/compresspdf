@@ -162,7 +162,7 @@ $('#go').onclick=async()=>{
     const info=card.querySelector('.h');
     try{
       const r=await compress(f,o,t=>{info.textContent=t;$('#st').textContent=t});
-      const name=f.name.replace(/\.pdf$/i,'')+'_comp.pdf',pct=Math.round((1-r.blob.size/f.size)*100);
+      const name=f.name.replace(/\.pdf$/i,'')+'.pdf',pct=Math.round((1-r.blob.size/f.size)*100);
       const miss=o.max&&r.blob.size>o.max*1024;
       info.innerHTML='';
       const l1=document.createElement('div');l1.className=miss?'er':'ok';
