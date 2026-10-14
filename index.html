@@ -32,6 +32,7 @@ button:disabled{opacity:.5;cursor:default}
 .h{color:var(--mut);font-size:.85rem;margin-top:4px}
 .fl{margin:10px 0 0;padding:0;list-style:none;font-size:.9rem;color:var(--mut)}
 .res{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+[hidden]{display:none!important}
 .res .n{font-weight:600;word-break:break-all}.ok{color:var(--ok)}.er{color:var(--er)}
 </style>
 </head>
@@ -61,6 +62,7 @@ button:disabled{opacity:.5;cursor:default}
 
   <div style="margin-top:16px"><button class="p" id="go" disabled>Comprimir</button> <span class="h" id="st"></span></div>
 </div>
+<div class="card row" id="bar" hidden><label><input type="checkbox" id="all" checked> Seleccionar todo</label><span style="flex:1"></span><button id="dSel">Descargar seleccionados</button><button class="p" id="dAll">Descargar todo</button></div>
 <div id="out"></div>
 </main>
 
@@ -151,10 +153,51 @@ async function save(name,blob){
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
 
+const crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+const crc32=u=>{let c=-1;for(let i=0;i<u.length;i++)c=crcT[(c^u[i])&255]^(c>>>8);return(~c)>>>0};
+function makeZip(items){
+  const te=new TextEncoder(),d=new Date(),tm=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1),dt=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+  const loc=[],cen=[];let pos=0;
+  items.forEach(it=>{
+    const n=te.encode(it.name),c=crc32(it.data),len=it.data.length;
+    const L=new DataView(new ArrayBuffer(30));
+    L.setUint32(0,0x04034b50,true);L.setUint16(4,20,true);L.setUint16(6,0x0800,true);L.setUint16(10,tm,true);L.setUint16(12,dt,true);
+    L.setUint32(14,c,true);L.setUint32(18,len,true);L.setUint32(22,len,true);L.setUint16(26,n.length,true);
+    const C=new DataView(new ArrayBuffer(46));
+    C.setUint32(0,0x02014b50,true);C.setUint16(4,20,true);C.setUint16(6,20,true);C.setUint16(8,0x0800,true);C.setUint16(12,tm,true);C.setUint16(14,dt,true);
+    C.setUint32(16,c,true);C.setUint32(20,len,true);C.setUint32(24,len,true);C.setUint16(28,n.length,true);C.setUint32(42,pos,true);
+    loc.push(new Uint8Array(L.buffer),n,it.data);cen.push(new Uint8Array(C.buffer),n);
+    pos+=30+n.length+len;
+  });
+  const cs=cen.reduce((a,b)=>a+b.length,0),E=new DataView(new ArrayBuffer(22));
+  E.setUint32(0,0x06054b50,true);E.setUint16(8,items.length,true);E.setUint16(10,items.length,true);E.setUint32(12,cs,true);E.setUint32(16,pos,true);
+  return new Blob([...loc,...cen,new Uint8Array(E.buffer)],{type:'application/zip'});
+}
+const done=[];
+async function saveMany(list){
+  if(!list.length)return;
+  if(list.length===1)return save(list[0].name,list[0].blob);
+  const used=new Set(),items=[];
+  for(const r of list){
+    let n=r.name,i=2;
+    while(used.has(n))n=r.name.replace(/\.pdf$/i,'')+' ('+(i++)+').pdf';
+    used.add(n);items.push({name:n,data:new Uint8Array(await r.blob.arrayBuffer())});
+  }
+  await save('PDF_comprimidos.zip',makeZip(items));
+}
+function sync(){
+  const n=done.filter(r=>r.cb.checked).length;
+  $('#dSel').textContent='Descargar seleccionados ('+n+')';$('#dSel').disabled=!n;
+  $('#all').checked=n===done.length&&n>0;
+}
+$('#all').onchange=e=>{done.forEach(r=>r.cb.checked=e.target.checked);sync()};
+$('#dSel').onclick=()=>saveMany(done.filter(r=>r.cb.checked));
+$('#dAll').onclick=()=>saveMany(done);
+
 $('#go').onclick=async()=>{
   if(typeof pdfjsLib==='undefined'){$('#st').textContent='No se pudo cargar el lector de PDF (revisa tu conexión).';return}
   const o={dpi:+$('#dpi').value,q:+$('#q').value,max:+$('#max').value||0};
-  $('#go').disabled=true;$('#out').innerHTML='';
+  $('#go').disabled=true;$('#out').innerHTML='';$('#bar').hidden=true;done.length=0;
   for(const f of files){
     const card=document.createElement('div');card.className='card res';
     card.innerHTML='<div><div class="n"></div><div class="h"></div></div>';
@@ -162,7 +205,7 @@ $('#go').onclick=async()=>{
     const info=card.querySelector('.h');
     try{
       const r=await compress(f,o,t=>{info.textContent=t;$('#st').textContent=t});
-      const name=f.name.replace(/\.pdf$/i,'')+'.pdf',pct=Math.round((1-r.blob.size/f.size)*100);
+      const name=f.name.replace(/\.pdf$/i,'')+'_comp.pdf',pct=Math.round((1-r.blob.size/f.size)*100);
       const miss=o.max&&r.blob.size>o.max*1024;
       info.innerHTML='';
       const l1=document.createElement('div');l1.className=miss?'er':'ok';
@@ -172,9 +215,11 @@ $('#go').onclick=async()=>{
       info.append(l1,l2);
       const b=document.createElement('button');b.className='p';b.textContent='Descargar';
       b.onclick=()=>save(name,r.blob);card.appendChild(b);
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=true;cb.onchange=sync;card.prepend(cb);done.push({name,blob:r.blob,cb});
     }catch(e){info.textContent='Error: '+(e&&e.message||e);info.className='h er'}
   }
   $('#st').textContent='';$('#go').disabled=false;
+  if(done.length>1){$('#bar').hidden=false;sync()}
 };
 </script>
 </body>
